@@ -1,5 +1,5 @@
 {
   "character": "mina",
-  "image_mode": "B",
+  "image_mode": "pre_generate",
   "review_mode": "diff"
 }

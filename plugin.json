@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "persona-review",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "根拠に基づくコードレビューを、好きなキャラクターの口調と表情で届けます。",
   "extensions": {
     "com.openai": {

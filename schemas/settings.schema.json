@@ -4,7 +4,7 @@
   "additionalProperties": false,
   "properties": {
     "character": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,47}$"},
-    "image_mode": {"type": "string", "enum": ["A", "B", "hybrid"]},
+    "image_mode": {"type": "string", "enum": ["always", "hybrid", "pre_generate", "A", "B"]},
     "review_mode": {"type": "string", "enum": ["auto", "diff", "full"]}
   }
 }

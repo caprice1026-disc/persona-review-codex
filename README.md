@@ -22,7 +22,7 @@ Python 3.10以降と、スキルを利用できるCodex環境が必要です。�
 }
 ```
 
-marketplaceを追加するCLIは `codex plugin marketplace add <marketplaceのルート>` です。インストールとスキルの試用はデスクトップのプラグイン画面から行います。この開発環境ではCodex CLIがPATHにないため、実機インストールと画像生成の一連の動作は未検証です。ユーザー環境への自動登録は行いません。
+検証したCodex CLIでは、`codex plugin marketplace add <marketplaceのルート>`、`codex plugin add persona-review@persona-review-local` の順にインストールできます。導入後は新しいCodexセッションでスキルを使います。CLIの利用可否はインストール先とバージョンに依存するため、手元の `codex plugin --help` も確認してください。
 
 形式の根拠は [OpenAI公式のプラグイン仕様](https://developers.openai.com/plugins/build/plugins) と [スキル仕様](https://developers.openai.com/plugins/build/skills) です。2026年10月18日に確認した形式を使用しています。Hooksはレビュー依頼の範囲外で処理を開始しないよう、同梱していません。
 
@@ -34,17 +34,25 @@ marketplaceを追加するCLIは `codex plugin marketplace add <marketplaceの�
 
 > ミナにこのプロジェクトの変更点をレビューしてもらいたい。
 
-> このGitHub PRをレビューして。今回は画像モードBで、セキュリティを中心に見て。
+> このGitHub PRをレビューして。今回は都度生成で、セキュリティを中心に見て。
 
-> このプロジェクトだけ画像モードをBにして。プロジェクト設定による上書きも許可して。
+> ミナの画像は最初に全部生成にして。保存済みの表情はそのまま使って。
+
+> ミナの不足している表情だけ、もう一度生成して。
+
+> このプロジェクトだけ画像モードをハイブリッドにして。プロジェクト設定による上書きも許可して。
 
 `review` が対象の選択とレビューを担当し、`review-config` が登録・変更を担当します。キャラクターを差し替えても評価基準は同じです。GitHubからの読み取りに使えるコネクタがなければ、取得できなかったことを伝えます。
 
 |画像モード|動作|
 |---|---|
-|A|登録した参照画像から、毎回そのレビューの表情を生成|
-|B|登録済みの該当表情を選択。なければ画像なし|
-|hybrid|登録済みの該当表情を優先し、なければ参照画像から生成|
+|都度生成 (`always`)|保存画像があっても毎回そのレビューの表情を生成し、新しい画像として保存|
+|ハイブリッド (`hybrid`)|同じキャラクター・参照画像・感情の有効画像を再利用。不足時は生成して保存|
+|最初に全部生成 (`pre_generate`)|`happy / neutral / concerned / stern` の4表情を初期生成。有効な既存画像は再利用し、不足分だけ生成・保存|
+
+全モードで生成画像をプラグイン外のユーザーデータへ永続保存します。古い画像を上書き・削除せず、感情キー、生成元、キャラクター識別値、参照画像と生成画像のSHA-256を記録します。キャラクターID・名前・外見・参照画像の内容が変わると別のキャッシュになり、口調だけの変更では同じ画像を使えます。
+
+旧設定は `A → always`、`B → pre_generate`、`hybrid → hybrid` と読み込みます。旧Bは「画像がなければ何も生成しない」動作から、不足する4表情を生成する動作へ変わります。設定の読み込みや移行コマンドだけでは生成しません。旧登録画像は初回の画像計画・更新時に履歴へ取り込み、元ファイルを保持します。更新後に旧版から設定を書き戻す運用は対象外です。
 
 生成に使うのはCodex標準の `image_gen` だけです。利用できない場合、または参照画像がない場合は、理由を添えてレビュー本文を届けます。ソースコード、秘密情報、問題の詳細は画像生成に渡しません。
 
@@ -60,17 +68,20 @@ python scripts/persona_review.py set image_mode hybrid
 python scripts/persona_review.py resolve
 python scripts/persona_review.py validate-review examples/review.json
 python scripts/persona_review.py plan examples/review.json
+python scripts/persona_review.py plan-set --character mina
 ```
 
 画像を登録する際は `python scripts/persona_review.py import-image mina reference <画像パス>` を使います。`reference` を `happy`、`neutral`、`concerned`、`stern` にすると表情画像を登録できます。差し替えは同じコマンドで行います。設定を試すだけの場合は `--data-dir <一時ディレクトリ>` をサブコマンドの前に指定してください。
+
+生成成功後は、生成前に保存した1件の計画JSONと実画像を `save-generated <計画JSON> <画像パス>` に渡します。同じ計画・画像の再保存は重複を作りません。生成失敗では成功記録を作らず、初期セットの一部が失敗しても成功分を保持します。次回の `plan-set` は不足分だけを生成対象にします。破損画像は `invalidate-image <記録ID>` で再利用対象から外せます。詳しい手順は [画像ワークフロー](docs/image-workflow.md) を参照してください。
 
 設定の優先順位は **明示指定 > プロジェクト設定 > グローバル設定 > 同梱既定値** です。プロジェクト設定は既定で無効になっています。許可する場合は `set allow_project_overrides true` を使います。詳細は [設計](docs/design.md) を参照してください。
 
 ## 検証と制約
 
-2026年10月18日、作成担当とは独立したGPT-6 Astraのレビューを受け、指摘されたJSON保存サイズ上限の不整合を修正し、修正後の再確認を完了しました。既存設定の保持とUTF-8バイト数の境界を含む20件のテストが成功しています。
+v0.1.0は作成担当とは独立したGPT-6 Astraのレビューと指摘修正後の再確認を完了しています。今回のv0.2.0変更は独立レビュー指摘の修正後、再確認待ちです。設定の保持、UTF-8バイト数上限、画像履歴、キャッシュ分離、保存失敗からの再試行など31件のテストが成功しています。
 
-Codexへの実インストール、GitHubコネクタを使った入力取得から出力までのE2E、実際の `image_gen` による画像生成は未検証です。
+Windows上のCodex CLIへの実インストール、自然言語設定、合成コードのレビュー、標準 `image_gen` の生成・表示を確認しました。v0.2.0では実画像の永続保存、hybridでの同じ表情の再利用、alwaysでの追加保存、初期4表情の不足分だけの生成、隔離コピーのデコード故障後の再試行を確認しています。画像障害中も中立レビューと技術本文を保持しました。GitHubコネクタを使った入力取得から出力までのE2E、生成サービス自体の障害、デスクトップGUI内の全操作は未検証です。
 
 ```powershell
 python -m unittest discover -s tests -v

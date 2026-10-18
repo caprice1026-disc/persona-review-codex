@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "id",
+    "character_id",
+    "character_fingerprint",
+    "reference_sha256",
+    "context_key",
+    "reference_asset",
+    "expression",
+    "asset",
+    "image_sha256",
+    "origin",
+    "usable",
+    "created_at"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "character_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,47}$"
+    },
+    "character_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "reference_sha256": {
+      "type": "string",
+      "pattern": "^(none|missing|[0-9a-f]{64})$"
+    },
+    "context_key": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "reference_asset": {
+      "type": "string",
+      "pattern": "^([0-9a-f]{32}\\.(png|jpg|webp))?$"
+    },
+    "expression": {
+      "type": "string",
+      "enum": [
+        "happy",
+        "neutral",
+        "concerned",
+        "stern"
+      ]
+    },
+    "asset": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}\\.(png|jpg|webp)$"
+    },
+    "image_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "origin": {
+      "type": "string",
+      "enum": [
+        "image_gen",
+        "imported",
+        "legacy"
+      ]
+    },
+    "usable": {
+      "type": "boolean"
+    },
+    "created_at": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    }
+  }
+}

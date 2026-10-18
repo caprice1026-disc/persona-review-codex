@@ -29,6 +29,8 @@
         "image_mode": {
           "type": "string",
           "enum": [
+            "always",
+            "pre_generate",
             "A",
             "B",
             "hybrid"

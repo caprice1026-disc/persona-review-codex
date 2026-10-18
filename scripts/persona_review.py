@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import copy
+from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,6 +20,8 @@ MAX_JSON_BYTES = 2_000_000
 DEFAULTS = {"character": "guide", "image_mode": "hybrid", "review_mode": "auto"}
 GUIDE = {"name": "ガイド", "persona": "穏やかで簡潔な日本語。根拠を添えて話す。", "appearance": "", "images": {}}
 EXPRESSIONS = ("happy", "neutral", "concerned", "stern")
+MODE_ALIASES = {"A": "always", "B": "pre_generate"}
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 
 class Invalid(ValueError):
@@ -159,6 +163,7 @@ def atomic_json(path, doc):
 def update(data_dir, mutation):
     with locked(data_dir):
         doc = load_config(data_dir)
+        migrate_catalog_locked(data_dir, doc)
         mutation(doc)
         validate_config(doc)
         atomic_json(Path(data_dir) / "config.json", doc)
@@ -178,6 +183,7 @@ def resolve(data_dir, project=None, explicit=None):
     validate(overrides, schema("settings"))
     settings.update(overrides)
     sources.update({key: "explicit" for key in overrides})
+    settings["image_mode"] = MODE_ALIASES.get(settings["image_mode"], settings["image_mode"])
     key = settings["character"]
     character = doc["characters"].get(key, GUIDE if key == "guide" else None)
     if character is None:
@@ -205,33 +211,187 @@ def image_type(data):
     raise Invalid("expected a PNG, JPEG, or WebP image")
 
 
+def image_bytes(path):
+    with open(path, "rb") as handle:
+        data = handle.read(MAX_IMAGE_BYTES + 1)
+    if len(data) > MAX_IMAGE_BYTES:
+        raise Invalid("image exceeds 10 MiB")
+    image_type(data)
+    return data
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def object_digest(value):
+    return digest(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+
+def image_context(data_dir, key, character):
+    reference = character["images"].get("reference", "")
+    reference_hash = "none"
+    if reference:
+        try:
+            reference_hash = digest(image_bytes(asset_path(data_dir, reference)))
+        except (OSError, Invalid):
+            reference_hash = "missing"
+    identity = {"name": character["name"], "appearance": character["appearance"]}
+    fields = {"character_id": key, "character_fingerprint": object_digest(identity),
+              "reference_sha256": reference_hash}
+    return fields | {"context_key": object_digest(fields), "reference_asset": reference}
+
+
+def record_path(data_dir, record_id):
+    if not re.fullmatch(r"[0-9a-f]{32}", record_id):
+        raise Invalid("invalid image record id")
+    root = Path(data_dir).resolve()
+    path = (root / "image-records" / f"{record_id}.json").resolve()
+    if path.parent != root / "image-records":
+        raise Invalid("image record escapes managed directory")
+    return path
+
+
+def validate_context(value):
+    fields = {key: value[key] for key in ("character_id", "character_fingerprint", "reference_sha256")}
+    character_id(fields["character_id"])
+    if object_digest(fields) != value["context_key"]:
+        raise Invalid("image context key does not match its provenance")
+
+
+def make_record(record_id, context, mood, asset, data, origin):
+    return {"version": 1, "id": record_id, **context, "expression": mood, "asset": asset,
+            "image_sha256": digest(data), "origin": origin, "usable": True,
+            "created_at": datetime.now(timezone.utc).isoformat()}
+
+
+def save_record(data_dir, record):
+    validate(record, schema("image-record"))
+    validate_context(record)
+    atomic_json(record_path(data_dir, record["id"]), record)
+
+
+def migrate_catalog_locked(data_dir, doc):
+    marker = Path(data_dir) / "image-catalog.json"
+    if marker.exists():
+        if read_json(marker) != {"version": 1}:
+            raise Invalid("unsupported image catalog version")
+        return
+    # Capture legacy bindings before a reference or character edit can change their identity.
+    for key, character in doc["characters"].items():
+        context = image_context(data_dir, key, character)
+        for mood in EXPRESSIONS:
+            asset = character["images"].get(mood)
+            if not asset:
+                continue
+            try:
+                data = image_bytes(asset_path(data_dir, asset))
+            except (OSError, Invalid):
+                continue
+            record_id = object_digest([key, mood, asset, context["context_key"]])[:32]
+            if not record_path(data_dir, record_id).exists():
+                save_record(data_dir, make_record(record_id, context, mood, asset, data, "legacy"))
+    atomic_json(marker, {"version": 1})
+
+
+def migrate_catalog(data_dir):
+    with locked(data_dir):
+        migrate_catalog_locked(data_dir, load_config(data_dir))
+
+
+def cached_image(data_dir, context, mood):
+    if context["reference_sha256"] == "missing":
+        return None
+    candidates = []
+    directory = record_path(data_dir, "0" * 32).parent
+    for path in directory.glob("*.json"):
+        try:
+            record = read_json(record_path(data_dir, path.stem))
+            validate(record, schema("image-record"))
+            validate_context(record)
+            if record["id"] != path.stem:
+                continue
+            if record["usable"] and record["context_key"] == context["context_key"] and record["expression"] == mood:
+                candidates.append(record)
+        except (Invalid, OSError, UnicodeError, json.JSONDecodeError):
+            continue
+    for record in sorted(candidates, key=lambda item: (item["created_at"], item["id"]), reverse=True):
+        try:
+            path = asset_path(data_dir, record["asset"])
+            if digest(image_bytes(path)) == record["image_sha256"]:
+                return {"action": "use_cached", "expression": mood, "image_path": str(path),
+                        "record_id": record["id"], "context_key": context["context_key"], "origin": record["origin"]}
+        except (Invalid, OSError):
+            continue
+    return None
+
+
+def write_asset(data_dir, data):
+    filename = f"{uuid.uuid4().hex}.{image_type(data)}"
+    dest = asset_path(data_dir, filename)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with open(dest, "xb") as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+    return filename
+
+
 def import_image(data_dir, key, slot, source):
     character_id(key)
     if slot not in ("reference", *EXPRESSIONS):
         raise Invalid("invalid image slot")
-    with open(source, "rb") as handle:
-        data = handle.read(10 * 1024 * 1024 + 1)
-    if len(data) > 10 * 1024 * 1024:
-        raise Invalid("image exceeds 10 MiB")
-    suffix = image_type(data)
+    data = image_bytes(source)
     with locked(data_dir):
         doc = load_config(data_dir)
+        migrate_catalog_locked(data_dir, doc)
         if key not in doc["characters"]:
             if key != "guide":
                 raise Invalid("register the character first")
             doc["characters"][key] = copy.deepcopy(GUIDE)
-        filename = f"{uuid.uuid4().hex}.{suffix}"
-        dest = asset_path(data_dir, filename)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        # Immutable assets prevent a failed config save from altering the current image.
-        with open(dest, "xb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        doc["characters"][key]["images"][slot] = filename
-        validate_config(doc)
-        atomic_json(Path(data_dir) / "config.json", doc)
+        filename = write_asset(data_dir, data)
+        if slot == "reference":
+            doc["characters"][key]["images"][slot] = filename
+            validate_config(doc)
+            atomic_json(Path(data_dir) / "config.json", doc)
+        else:
+            # The catalog is authoritative for expressions; commit only one binding.
+            context = image_context(data_dir, key, doc["characters"][key])
+            save_record(data_dir, make_record(uuid.uuid4().hex, context, slot, filename, data, "imported"))
     return filename
+
+
+def save_generated(data_dir, plan, source):
+    validate(plan, schema("generation-plan"))
+    validate_context(plan)
+    data = image_bytes(source)
+    with locked(data_dir):
+        migrate_catalog_locked(data_dir, load_config(data_dir))
+        path = record_path(data_dir, plan["request_id"])
+        if path.exists():
+            previous = read_json(path)
+            validate(previous, schema("image-record"))
+            validate_context(previous)
+            if (previous["id"] != plan["request_id"] or previous["image_sha256"] != digest(data) or previous["context_key"] != plan["context_key"]
+                    or previous["expression"] != plan["expression"] or previous["origin"] != "image_gen"):
+                raise Invalid("request id already saved with a different result")
+            if digest(image_bytes(asset_path(data_dir, previous["asset"]))) != previous["image_sha256"]:
+                raise Invalid("saved image is damaged; keep the new output and retry with a new plan")
+            return previous
+        context = {key: plan[key] for key in ("character_id", "character_fingerprint", "reference_sha256", "context_key", "reference_asset")}
+        record = make_record(plan["request_id"], context, plan["expression"], write_asset(data_dir, data), data, "image_gen")
+        # Keep the captured generation identity even if settings changed while the tool ran.
+        save_record(data_dir, record)
+        return record
+
+
+def invalidate_image(data_dir, record_id):
+    with locked(data_dir):
+        path = record_path(data_dir, record_id)
+        record = read_json(path)
+        validate(record, schema("image-record"))
+        record["usable"] = False
+        save_record(data_dir, record)
 
 
 def validate_review(review):
@@ -258,28 +418,35 @@ def expression(review):
     return "happy"
 
 
+def expression_plan(data_dir, resolved, mood, force=False):
+    character = resolved["character"]
+    context = image_context(data_dir, resolved["settings"]["character"], character)
+    cached = cached_image(data_dir, context, mood) if not force else None
+    if cached:
+        return cached
+    if context["reference_sha256"] in ("none", "missing"):
+        return {"action": "unavailable", "expression": mood, "reason": "reference image is not registered"}
+    return {"action": "generate", "request_id": uuid.uuid4().hex, **context, "expression": mood,
+            "reference_path": str(asset_path(data_dir, context["reference_asset"])),
+            "appearance_data": character["appearance"], "generator": "Codex image_gen"}
+
+
+def set_plan(data_dir, resolved):
+    migrate_catalog(data_dir)
+    plans = [expression_plan(data_dir, resolved, mood) for mood in EXPRESSIONS]
+    return {"action": "prepare_set", "expressions": list(EXPRESSIONS), "plans": plans,
+            "complete": all(plan["action"] == "use_cached" for plan in plans)}
+
+
 def visual_plan(data_dir, resolved, review):
     mood = expression(review)
+    migrate_catalog(data_dir)
     mode = resolved["settings"]["image_mode"]
-    character = resolved["character"]
-    def available(slot):
-        name = character["images"].get(slot)
-        if name:
-            path = asset_path(data_dir, name)
-            if path.is_file():
-                return str(path)
-        return None
-    registered = available(mood) if mode in ("B", "hybrid") else None
-    if registered:
-        return {"action": "use_registered", "expression": mood, "image_path": registered}
-    if mode == "B":
-        return {"action": "unavailable", "expression": mood, "reason": "matching expression image is not registered"}
-    reference = available("reference")
-    if not reference:
-        return {"action": "unavailable", "expression": mood, "reason": "reference image is not registered"}
-    # This is data for Codex, not a tool call or executable prompt. No review text is included.
-    return {"action": "generate", "expression": mood, "reference_path": reference,
-            "appearance_data": character["appearance"], "generator": "Codex image_gen"}
+    if mode == "pre_generate":
+        result = set_plan(data_dir, resolved)
+        if not result["complete"]:
+            return result | {"expression": mood}
+    return expression_plan(data_dir, resolved, mood, force=mode == "always")
 
 
 def main(argv=None):
@@ -291,6 +458,7 @@ def main(argv=None):
     parser.add_argument("--data-dir", type=Path, default=default_data_dir())
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("show")
+    sub.add_parser("migrate")
     setting = sub.add_parser("set")
     setting.add_argument("key", choices=[*DEFAULTS, "allow_project_overrides"])
     setting.add_argument("value")
@@ -305,7 +473,12 @@ def main(argv=None):
     imp.add_argument("id")
     imp.add_argument("slot", choices=["reference", *EXPRESSIONS])
     imp.add_argument("source", type=Path)
-    for name in ("resolve", "plan"):
+    saved = sub.add_parser("save-generated")
+    saved.add_argument("plan", type=Path)
+    saved.add_argument("source", type=Path)
+    rejected = sub.add_parser("invalidate-image")
+    rejected.add_argument("record_id")
+    for name in ("resolve", "plan", "plan-set"):
         command = sub.add_parser(name)
         command.add_argument("--project", type=Path)
         for key in DEFAULTS:
@@ -318,6 +491,9 @@ def main(argv=None):
     try:
         if args.command == "show":
             result = load_config(args.data_dir)
+        elif args.command == "migrate":
+            migrate_catalog(args.data_dir)
+            result = {"migrated": True}
         elif args.command == "set":
             def change(doc):
                 if args.key == "allow_project_overrides":
@@ -325,7 +501,7 @@ def main(argv=None):
                         raise Invalid("use true or false")
                     doc[args.key] = args.value == "true"
                 else:
-                    doc["settings"][args.key] = args.value
+                    doc["settings"][args.key] = MODE_ALIASES.get(args.value, args.value) if args.key == "image_mode" else args.value
             update(args.data_dir, change)
             result = {"saved": True}
         elif args.command == "set-project":
@@ -334,7 +510,7 @@ def main(argv=None):
             with locked(args.path.parent, ".persona-review.lock"):
                 overrides = read_json(args.path) if args.path.exists() else {}
                 validate(overrides, schema("settings"))
-                overrides[args.key] = args.value
+                overrides[args.key] = MODE_ALIASES.get(args.value, args.value) if args.key == "image_mode" else args.value
                 resolve(args.data_dir, explicit=overrides)
                 atomic_json(args.path, overrides)
             result = {"saved": True, "project_overrides_enabled": load_config(args.data_dir)["allow_project_overrides"]}
@@ -352,13 +528,23 @@ def main(argv=None):
             result = {"registered": key}
         elif args.command == "import-image":
             result = {"asset": import_image(args.data_dir, args.id, args.slot, args.source)}
+        elif args.command == "save-generated":
+            result = save_generated(args.data_dir, read_json(args.plan), args.source)
+        elif args.command == "invalidate-image":
+            invalidate_image(args.data_dir, args.record_id)
+            result = {"invalidated": args.record_id, "image_preserved": True}
         elif args.command == "validate-review":
             validate_review(read_json(args.review))
             result = {"valid": True}
         else:
             explicit = {key: getattr(args, key) for key in DEFAULTS if getattr(args, key) is not None}
             resolved = resolve(args.data_dir, args.project, explicit)
-            result = resolved if args.command == "resolve" else visual_plan(args.data_dir, resolved, read_json(args.review))
+            if args.command == "resolve":
+                result = resolved
+            elif args.command == "plan-set":
+                result = set_plan(args.data_dir, resolved)
+            else:
+                result = visual_plan(args.data_dir, resolved, read_json(args.review))
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (Invalid, OSError, UnicodeError, json.JSONDecodeError) as exc:
