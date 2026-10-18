@@ -18,6 +18,15 @@ ROOT = Path(__file__).resolve().parents[1]
 BLOCKED_SHELLS = {}
 
 
+def powershell_argument_assignment(arguments):
+    encoded = base64.b64encode(json.dumps(arguments).encode('utf-8')).decode('ascii')
+    # PS5 emits the decoded array as one pipeline object; @(...pipeline...)
+    # would wrap it again. A typed direct assignment also keeps a single string
+    # as one argument rather than splatting its characters on PS7.
+    return ("[string[]]$values = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"+encoded+"')) | ConvertFrom-Json\n"
+            "if ($null -eq $values) { $values = @() }\n")
+
+
 @lru_cache(maxsize=1)
 def launchers():
     found = []
@@ -87,15 +96,13 @@ class LauncherTests(unittest.TestCase):
                               encoding='utf-8', newline='\n')
             command = [executable, script.as_posix()]
         else:
-            # Use typed PowerShell splatting so outer -File legacy parsing cannot
+            # Use PowerShell splatting so outer -File legacy parsing cannot
             # consume empty strings or quotes before the launcher receives them.
-            encoded = base64.b64encode(json.dumps(arguments).encode('utf-8')).decode('ascii')
             script = self.base/'invoke.ps1'
             launcher = str(self.plugin/'scripts/persona-review.ps1').replace("'", "''")
             change_location = ("Set-Location -LiteralPath '"+str(ps_location).replace("'", "''")+"'\n") if ps_location else ''
             script.write_text(
-                change_location+
-                "$values = @([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"+encoded+"')) | ConvertFrom-Json)\n"
+                change_location+powershell_argument_assignment(arguments)+
                 "& '"+launcher+"' @values\nexit $LASTEXITCODE\n", encoding='ascii')
             command = [executable, '-NoLogo', '-NoProfile', '-File', str(script)]
         return subprocess.run(command, cwd=self.cwd, env=env, capture_output=True,
@@ -123,11 +130,34 @@ class LauncherTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 actual = json.loads(result.stdout)
                 self.assertEqual(actual['argv'], values)
-                self.assertEqual(Path(actual['cwd']), self.cwd)
+                self.assertTrue(Path(actual['cwd']).samefile(self.cwd))
                 self.assertEqual(actual['isolated'], 1)
                 self.assertEqual(actual['automatic_install'], 'false')
                 self.assertIsNone(actual['allow_install'])
                 self.assertIsNone(actual['always_install'])
+        # Check the JSON-to-splat boundary itself on both Windows shells. This
+        # invokes only an in-memory argument-capture function, not a script file
+        # or the plugin, even when local policy refuses PS5 script execution.
+        powershells = [backend for backend in self.backends if backend[0].startswith('powershell')]
+        if os.name == 'nt' and not any(name == 'powershell5' for name, _ in powershells):
+            ps5 = Path(os.environ.get('SystemRoot', 'C:/Windows'))/'System32/WindowsPowerShell/v1.0/powershell.exe'
+            if ps5.is_file():
+                powershells.append(('powershell5', str(ps5)))
+        for name, executable in powershells:
+            for arguments in ([], [''], ['single'], values):
+                with self.subTest(transport=name, arguments=arguments):
+                    command = (
+                        "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)\n"
+                        "function Capture-Arguments { [Console]::Out.Write((ConvertTo-Json -InputObject @($args) -Compress)) }\n"
+                        +powershell_argument_assignment(arguments)+"Capture-Arguments @values\n")
+                    environment = os.environ.copy()
+                    if name == 'powershell5':
+                        environment.pop('PSModulePath', None)
+                    result = subprocess.run([executable, '-NoLogo', '-NoProfile', '-Command', command],
+                                            env=environment, capture_output=True, text=True,
+                                            encoding='utf-8', timeout=20)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads(result.stdout), arguments)
         # Verify the .NET Framework quoting branch with the real Windows Python
         # process even if local policy disallows running Windows PowerShell 5.1.
         pwsh = next((backend for backend in self.backends if backend[0] == 'powershell7'), None)
@@ -138,6 +168,20 @@ class LauncherTests(unittest.TestCase):
             result = self.run_launcher(pwsh, values)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)['argv'], values)
+
+    def test_working_directory_alias_keeps_identity(self):
+        self.stub_helper()
+        alias_parent = self.base/'alias parent'
+        alias_parent.mkdir()
+        self.cwd = alias_parent/'..'/self.cwd.name
+        for backend in self.backends:
+            with self.subTest(backend=backend[0]):
+                result = self.run_launcher(backend, ['identity'])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                actual = Path(json.loads(result.stdout)['cwd'])
+                self.assertNotEqual(actual, self.cwd)
+                self.assertTrue(actual.samefile(self.cwd))
+                self.assertFalse(actual.samefile(self.plugin))
 
     def test_real_helper_relative_paths_and_empty_focus(self):
         for index, backend in enumerate(self.backends):
@@ -221,8 +265,8 @@ class LauncherTests(unittest.TestCase):
         selected = self.base/'selected location with spaces'
         selected.mkdir()
         # The host Python and TEMP may be on different Windows drives. Build a
-        # real interpreter fixture beside the selected location so a relative
-        # override is always meaningful; no pip, downloads, or symlinks needed.
+        # real interpreter inside the selected location so only that cwd can
+        # resolve the relative override; no pip, downloads, or symlinks needed.
         runtime = selected/'python fixture with spaces'
         venv.EnvBuilder(with_pip=False, symlinks=False).create(runtime)
         executable = runtime/('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
@@ -237,8 +281,8 @@ class LauncherTests(unittest.TestCase):
                 self.assertEqual(relative.returncode, 0, relative.stderr)
                 self.assertEqual(absolute.returncode, 0, absolute.stderr)
                 self.assertEqual(json.loads(relative.stdout)['argv'], ['relative'])
-                self.assertEqual(Path(json.loads(relative.stdout)['cwd']), selected)
-                self.assertEqual(json.loads(relative.stdout)['cwd'], json.loads(absolute.stdout)['cwd'])
+                self.assertTrue(Path(json.loads(relative.stdout)['cwd']).samefile(selected))
+                self.assertTrue(Path(json.loads(relative.stdout)['cwd']).samefile(json.loads(absolute.stdout)['cwd']))
 
 
 if __name__ == '__main__':
