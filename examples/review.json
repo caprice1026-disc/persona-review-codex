@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "scope": {
+    "mode": "diff",
+    "reason": "架空の使用例。作業中の変更点を対象に選択した。",
+    "reviewed": [],
+    "unverified": ["差分が空のためコードを検査していない。テストも実行していない。"],
+    "status": "empty"
+  },
+  "summary": "対象差分がないため、技術的な良否は判断していない。",
+  "strengths": [],
+  "findings": []
+}

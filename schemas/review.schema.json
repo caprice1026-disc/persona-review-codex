@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "scope", "summary", "strengths", "findings"],
+  "properties": {
+    "version": {"type": "integer", "enum": [1]},
+    "scope": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode", "reason", "reviewed", "unverified", "status"],
+      "properties": {
+        "mode": {"type": "string", "enum": ["diff", "full"]},
+        "reason": {"type": "string", "minLength": 1},
+        "reviewed": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "unverified": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "status": {"type": "string", "enum": ["complete", "partial", "empty", "unavailable"]}
+      }
+    },
+    "summary": {"type": "string", "minLength": 1},
+    "strengths": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "severity", "title", "file", "line", "evidence", "impact", "suggestion"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+          "title": {"type": "string", "minLength": 1},
+          "file": {"type": "string", "minLength": 1},
+          "line": {"type": "integer", "minimum": 1},
+          "evidence": {"type": "string", "minLength": 1},
+          "impact": {"type": "string", "minLength": 1},
+          "suggestion": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}
