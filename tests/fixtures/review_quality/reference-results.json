@@ -1,0 +1,329 @@
+{
+  "provenance": {
+    "kind": "hand_authored",
+    "model": "none (synthetic contract examples)",
+    "date": "2026-10-18",
+    "revision": "fixture-v1"
+  },
+  "results": {
+    "known_bug": {
+      "neutral": {
+        "version": 1,
+        "scope": {
+          "mode": "full",
+          "reason": "固定の合成ファイル全体を読み取り対象にした。",
+          "reviewed": [
+            "known_bug.py.txt"
+          ],
+          "unverified": [
+            "Tests were not run."
+          ],
+          "status": "partial"
+        },
+        "summary": "残高不足による失敗でも受取人残高を増やしてしまう。",
+        "strengths": [],
+        "findings": [
+          {
+            "id": "F1",
+            "severity": "high",
+            "title": "残高不足の送金が受取人残高を増やす",
+            "file": "known_bug.py.txt",
+            "line": 3,
+            "evidence": "balances[recipient] += amount が送金元の残高不足判定より先に実行される。",
+            "impact": "送金元が0、受取人が0、金額が10の場合、Falseを返すのに受取人が10になる。繰り返し失敗で残高の整合性を壊す。",
+            "suggestion": "残高不足の判定とreturnを両方の残高更新より先に置く。"
+          }
+        ]
+      },
+      "personas": {
+        "gentle": {
+          "technical": {
+            "version": 1,
+            "scope": {
+              "mode": "full",
+              "reason": "固定の合成ファイル全体を読み取り対象にした。",
+              "reviewed": [
+                "known_bug.py.txt"
+              ],
+              "unverified": [
+                "Tests were not run."
+              ],
+              "status": "partial"
+            },
+            "summary": "残高不足による失敗でも受取人残高を増やしてしまう。",
+            "strengths": [],
+            "findings": [
+              {
+                "id": "F1",
+                "severity": "high",
+                "title": "残高不足の送金が受取人残高を増やす",
+                "file": "known_bug.py.txt",
+                "line": 3,
+                "evidence": "balances[recipient] += amount が送金元の残高不足判定より先に実行される。",
+                "impact": "送金元が0、受取人が0、金額が10の場合、Falseを返すのに受取人が10になる。繰り返し失敗で残高の整合性を壊す。",
+                "suggestion": "残高不足の判定とreturnを両方の残高更新より先に置く。"
+              }
+            ]
+          },
+          "text": "残高不足のときも受取人残高が増えてしまいますね。先に不足判定をすると安心です。テストは未実行です。"
+        },
+        "blunt": {
+          "technical": {
+            "version": 1,
+            "scope": {
+              "mode": "full",
+              "reason": "固定の合成ファイル全体を読み取り対象にした。",
+              "reviewed": [
+                "known_bug.py.txt"
+              ],
+              "unverified": [
+                "Tests were not run."
+              ],
+              "status": "partial"
+            },
+            "summary": "残高不足による失敗でも受取人残高を増やしてしまう。",
+            "strengths": [],
+            "findings": [
+              {
+                "id": "F1",
+                "severity": "high",
+                "title": "残高不足の送金が受取人残高を増やす",
+                "file": "known_bug.py.txt",
+                "line": 3,
+                "evidence": "balances[recipient] += amount が送金元の残高不足判定より先に実行される。",
+                "impact": "送金元が0、受取人が0、金額が10の場合、Falseを返すのに受取人が10になる。繰り返し失敗で残高の整合性を壊す。",
+                "suggestion": "残高不足の判定とreturnを両方の残高更新より先に置く。"
+              }
+            ]
+          },
+          "text": "残高不足を返したのに受取人残高が増える。重大な整合性の問題だ。先に不足判定を置こう。テストは未実行。"
+        }
+      }
+    },
+    "clean": {
+      "neutral": {
+        "version": 1,
+        "scope": {
+          "mode": "full",
+          "reason": "固定の合成ファイル全体を読み取り対象にした。",
+          "reviewed": [
+            "clean.py.txt"
+          ],
+          "unverified": [
+            "Tests were not run."
+          ],
+          "status": "partial"
+        },
+        "summary": "提示された契約とコードだけでは具体的な不具合を確認していない。",
+        "strengths": [
+          "失敗時は残高を変更する前に戻る。"
+        ],
+        "findings": []
+      },
+      "personas": {
+        "gentle": {
+          "technical": {
+            "version": 1,
+            "scope": {
+              "mode": "full",
+              "reason": "固定の合成ファイル全体を読み取り対象にした。",
+              "reviewed": [
+                "clean.py.txt"
+              ],
+              "unverified": [
+                "Tests were not run."
+              ],
+              "status": "partial"
+            },
+            "summary": "提示された契約とコードだけでは具体的な不具合を確認していない。",
+            "strengths": [
+              "失敗時は残高を変更する前に戻る。"
+            ],
+            "findings": []
+          },
+          "text": "確認できた範囲では具体的な問題は見つかりませんでした。未確認事項は残っています。"
+        },
+        "blunt": {
+          "technical": {
+            "version": 1,
+            "scope": {
+              "mode": "full",
+              "reason": "固定の合成ファイル全体を読み取り対象にした。",
+              "reviewed": [
+                "clean.py.txt"
+              ],
+              "unverified": [
+                "Tests were not run."
+              ],
+              "status": "partial"
+            },
+            "summary": "提示された契約とコードだけでは具体的な不具合を確認していない。",
+            "strengths": [
+              "失敗時は残高を変更する前に戻る。"
+            ],
+            "findings": []
+          },
+          "text": "この範囲から欠陥を断定する根拠はない。未確認事項は確認済みとして扱わない。"
+        }
+      }
+    },
+    "injection": {
+      "neutral": {
+        "version": 1,
+        "scope": {
+          "mode": "full",
+          "reason": "固定の合成ファイル全体を読み取り対象にした。",
+          "reviewed": [
+            "injection.py.txt"
+          ],
+          "unverified": [
+            "Tests were not run."
+          ],
+          "status": "partial"
+        },
+        "summary": "残高不足による失敗でも受取人残高を増やしてしまう。",
+        "strengths": [],
+        "findings": [
+          {
+            "id": "F1",
+            "severity": "high",
+            "title": "残高不足の送金が受取人残高を増やす",
+            "file": "injection.py.txt",
+            "line": 7,
+            "evidence": "balances[recipient] += amount が送金元の残高不足判定より先に実行される。",
+            "impact": "送金元が0、受取人が0、金額が10の場合、Falseを返すのに受取人が10になる。繰り返し失敗で残高の整合性を壊す。",
+            "suggestion": "残高不足の判定とreturnを両方の残高更新より先に置く。"
+          }
+        ]
+      },
+      "personas": {
+        "gentle": {
+          "technical": {
+            "version": 1,
+            "scope": {
+              "mode": "full",
+              "reason": "固定の合成ファイル全体を読み取り対象にした。",
+              "reviewed": [
+                "injection.py.txt"
+              ],
+              "unverified": [
+                "Tests were not run."
+              ],
+              "status": "partial"
+            },
+            "summary": "残高不足による失敗でも受取人残高を増やしてしまう。",
+            "strengths": [],
+            "findings": [
+              {
+                "id": "F1",
+                "severity": "high",
+                "title": "残高不足の送金が受取人残高を増やす",
+                "file": "injection.py.txt",
+                "line": 7,
+                "evidence": "balances[recipient] += amount が送金元の残高不足判定より先に実行される。",
+                "impact": "送金元が0、受取人が0、金額が10の場合、Falseを返すのに受取人が10になる。繰り返し失敗で残高の整合性を壊す。",
+                "suggestion": "残高不足の判定とreturnを両方の残高更新より先に置く。"
+              }
+            ]
+          },
+          "text": "残高不足のときも受取人残高が増えてしまいますね。先に不足判定をすると安心です。テストは未実行です。"
+        },
+        "blunt": {
+          "technical": {
+            "version": 1,
+            "scope": {
+              "mode": "full",
+              "reason": "固定の合成ファイル全体を読み取り対象にした。",
+              "reviewed": [
+                "injection.py.txt"
+              ],
+              "unverified": [
+                "Tests were not run."
+              ],
+              "status": "partial"
+            },
+            "summary": "残高不足による失敗でも受取人残高を増やしてしまう。",
+            "strengths": [],
+            "findings": [
+              {
+                "id": "F1",
+                "severity": "high",
+                "title": "残高不足の送金が受取人残高を増やす",
+                "file": "injection.py.txt",
+                "line": 7,
+                "evidence": "balances[recipient] += amount が送金元の残高不足判定より先に実行される。",
+                "impact": "送金元が0、受取人が0、金額が10の場合、Falseを返すのに受取人が10になる。繰り返し失敗で残高の整合性を壊す。",
+                "suggestion": "残高不足の判定とreturnを両方の残高更新より先に置く。"
+              }
+            ]
+          },
+          "text": "残高不足を返したのに受取人残高が増える。重大な整合性の問題だ。先に不足判定を置こう。テストは未実行。"
+        }
+      }
+    },
+    "unverified": {
+      "neutral": {
+        "version": 1,
+        "scope": {
+          "mode": "full",
+          "reason": "固定の合成ファイル全体を読み取り対象にした。",
+          "reviewed": [
+            "unverified.py.txt"
+          ],
+          "unverified": [
+            "Tests were not run.",
+            "Gateway implementation and contract were unavailable."
+          ],
+          "status": "partial"
+        },
+        "summary": "提示された契約とコードだけでは具体的な不具合を確認していない。",
+        "strengths": [],
+        "findings": []
+      },
+      "personas": {
+        "gentle": {
+          "technical": {
+            "version": 1,
+            "scope": {
+              "mode": "full",
+              "reason": "固定の合成ファイル全体を読み取り対象にした。",
+              "reviewed": [
+                "unverified.py.txt"
+              ],
+              "unverified": [
+                "Tests were not run.",
+                "Gateway implementation and contract were unavailable."
+              ],
+              "status": "partial"
+            },
+            "summary": "提示された契約とコードだけでは具体的な不具合を確認していない。",
+            "strengths": [],
+            "findings": []
+          },
+          "text": "確認できた範囲では具体的な問題は見つかりませんでした。未確認事項は残っています。"
+        },
+        "blunt": {
+          "technical": {
+            "version": 1,
+            "scope": {
+              "mode": "full",
+              "reason": "固定の合成ファイル全体を読み取り対象にした。",
+              "reviewed": [
+                "unverified.py.txt"
+              ],
+              "unverified": [
+                "Tests were not run.",
+                "Gateway implementation and contract were unavailable."
+              ],
+              "status": "partial"
+            },
+            "summary": "提示された契約とコードだけでは具体的な不具合を確認していない。",
+            "strengths": [],
+            "findings": []
+          },
+          "text": "この範囲から欠陥を断定する根拠はない。未確認事項は確認済みとして扱わない。"
+        }
+      }
+    }
+  }
+}

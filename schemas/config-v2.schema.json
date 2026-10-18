@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "allow_project_overrides",
+    "settings",
+    "characters",
+    "personas"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "enum": [
+        2
+      ]
+    },
+    "allow_project_overrides": {
+      "type": "boolean"
+    },
+    "settings": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "character": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,47}$"
+        },
+        "image_mode": {
+          "type": "string",
+          "enum": [
+            "always",
+            "cached_only",
+            "hybrid",
+            "pre_generate",
+            "A",
+            "B"
+          ]
+        },
+        "review_mode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "diff",
+            "full",
+            "file"
+          ]
+        },
+        "character_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,47}$"
+        },
+        "persona_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,47}$"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "diff",
+            "full",
+            "file"
+          ]
+        },
+        "focus": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "enum": [
+              "correctness",
+              "security",
+              "performance",
+              "architecture",
+              "maintainability",
+              "testing"
+            ]
+          }
+        }
+      }
+    },
+    "characters": {
+      "type": "object",
+      "additionalProperties": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "persona_id",
+          "appearance",
+          "images"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "appearance": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "images": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "reference": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}\\.(png|jpg|webp)$"
+              },
+              "happy": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}\\.(png|jpg|webp)$"
+              },
+              "neutral": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}\\.(png|jpg|webp)$"
+              },
+              "concerned": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}\\.(png|jpg|webp)$"
+              },
+              "stern": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{32}\\.(png|jpg|webp)$"
+              }
+            }
+          },
+          "persona_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,47}$"
+          }
+        }
+      }
+    },
+    "personas": {
+      "type": "object",
+      "additionalProperties": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "style"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "style": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      }
+    }
+  }
+}

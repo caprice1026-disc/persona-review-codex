@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "persona_id",
+    "appearance",
+    "images"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "appearance": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reference": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}\\.(png|jpg|webp)$"
+        },
+        "happy": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}\\.(png|jpg|webp)$"
+        },
+        "neutral": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}\\.(png|jpg|webp)$"
+        },
+        "concerned": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}\\.(png|jpg|webp)$"
+        },
+        "stern": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}\\.(png|jpg|webp)$"
+        }
+      }
+    },
+    "persona_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,47}$"
+    }
+  }
+}

@@ -17,8 +17,11 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_JSON_BYTES = 2_000_000
-DEFAULTS = {"character": "guide", "image_mode": "hybrid", "review_mode": "auto"}
+DEFAULTS = {"character_id": "guide", "persona_id": "default", "image_mode": "hybrid", "scope": "auto", "focus": []}
+SETTING_KEYS = (*DEFAULTS, "character", "review_mode")
 GUIDE = {"name": "ガイド", "persona": "穏やかで簡潔な日本語。根拠を添えて話す。", "appearance": "", "images": {}}
+GUIDE_PERSONA = {"name": GUIDE["name"], "style": GUIDE["persona"]}
+GUIDE_V2 = {key: copy.deepcopy(value) for key, value in GUIDE.items() if key != "persona"} | {"persona_id": "guide"}
 EXPRESSIONS = ("happy", "neutral", "concerned", "stern")
 MODE_ALIASES = {"A": "always", "B": "pre_generate"}
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
@@ -51,7 +54,7 @@ def schema(name):
 def validate(value, rule, location="$"):
     """Validate the deliberately small JSON Schema subset used by this package."""
     supported = {"$schema", "type", "required", "properties", "additionalProperties", "items",
-                 "enum", "pattern", "minLength", "maxLength", "minimum"}
+                 "enum", "pattern", "minLength", "maxLength", "minimum", "minItems", "maxItems"}
     if set(rule) - supported:
         raise Invalid("unsupported schema keyword")
     kind = rule.get("type")
@@ -72,6 +75,8 @@ def validate(value, rule, location="$"):
             elif type(rule.get("additionalProperties")) is dict:
                 validate(child, rule["additionalProperties"], f"{location}.{key}")
     elif kind == "array":
+        if len(value) < rule.get("minItems", 0) or len(value) > rule.get("maxItems", float("inf")):
+            raise Invalid(f"{location}: invalid item count")
         for index, child in enumerate(value):
             validate(child, rule["items"], f"{location}[{index}]")
     elif kind == "string":
@@ -93,21 +98,67 @@ def initial():
     return {"version": 1, "allow_project_overrides": False, "settings": {}, "characters": {}}
 
 
+def canonical_settings(value):
+    validate(value, schema("settings"))
+    result = copy.deepcopy(value)
+    for alias, canonical in (("character", "character_id"), ("review_mode", "scope")):
+        if alias in result:
+            if canonical in result and result[canonical] != result[alias]:
+                raise Invalid(f"conflicting settings: {alias} and {canonical}")
+            result[canonical] = result.pop(alias)
+    if "image_mode" in result:
+        result["image_mode"] = MODE_ALIASES.get(result["image_mode"], result["image_mode"])
+    if "focus" in result and len(set(result["focus"])) != len(result["focus"]):
+        raise Invalid("focus entries must be unique")
+    return result
+
+
+def persona_id(value):
+    result = character_id(value)
+    if result == "default":
+        raise Invalid("default is reserved for the character's default persona")
+    return result
+
+
+def legacy_persona_id(key):
+    return "legacy-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:24]
+
+
+def current_config(doc):
+    """Return a detached v2 view; reading v1 never changes disk."""
+    result = copy.deepcopy(doc)
+    result["settings"] = canonical_settings(result["settings"])
+    if result["version"] == 1:
+        result["version"] = 2
+        result["personas"] = {"guide": copy.deepcopy(GUIDE_PERSONA)}
+        for key, character in result["characters"].items():
+            identifier = legacy_persona_id(key)
+            result["personas"][identifier] = {"name": character["name"], "style": character.pop("persona")}
+            character["persona_id"] = identifier
+    return result
+
+
 def validate_config(doc):
-    validate(doc, schema("config"))
-    if type(doc) is not dict or set(doc) != {"version", "allow_project_overrides", "settings", "characters"}:
-        raise Invalid("invalid config fields")
-    if type(doc["version"]) is not int or doc["version"] != 1 or type(doc["allow_project_overrides"]) is not bool:
-        raise Invalid("invalid config version or project policy")
-    validate(doc["settings"], schema("settings"))
-    if type(doc["characters"]) is not dict:
-        raise Invalid("characters must be an object")
+    if type(doc) is not dict or type(doc.get("version")) is not int or doc["version"] not in (1, 2):
+        raise Invalid("invalid config version")
+    validate(doc, schema("config" if doc["version"] == 1 else "config-v2"))
+    settings = canonical_settings(doc["settings"])
     for key, value in doc["characters"].items():
         character_id(key)
-        validate(value, schema("character"))
-    selected = doc["settings"].get("character", "guide")
-    if selected != "guide" and selected not in doc["characters"]:
+        validate(value, schema("character" if doc["version"] == 1 else "character-v2"))
+    current = current_config(doc)
+    for key, value in current["personas"].items():
+        persona_id(key)
+        validate(value, schema("persona"))
+    for value in current["characters"].values():
+        if value["persona_id"] not in current["personas"] and value["persona_id"] != "guide":
+            raise Invalid("character persona is not registered")
+    selected = settings.get("character_id", "guide")
+    if selected != "guide" and selected not in current["characters"]:
         raise Invalid("default character is not registered")
+    selected = settings.get("persona_id", "default")
+    if selected not in ("default", "guide") and selected not in current["personas"]:
+        raise Invalid("default persona is not registered")
 
 
 def default_data_dir():
@@ -146,6 +197,10 @@ def atomic_json(path, doc):
     data = (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     if len(data) > MAX_JSON_BYTES:
         raise Invalid(f"JSON exceeds {MAX_JSON_BYTES} bytes")
+    atomic_bytes(path, data)
+
+
+def atomic_bytes(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temp = tempfile.mkstemp(prefix=".pending-", dir=path.parent)
@@ -160,35 +215,121 @@ def atomic_json(path, doc):
             os.unlink(temp)
 
 
+def save_config(data_dir, original, doc):
+    validate_config(doc)
+    # Check the final size before creating a migration backup or replacing config.
+    if len((json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode("utf-8")) > MAX_JSON_BYTES:
+        raise Invalid(f"JSON exceeds {MAX_JSON_BYTES} bytes")
+    path = Path(data_dir) / "config.json"
+    if original["version"] == 1 and path.exists():
+        data = path.read_bytes()
+        backup = path.with_name("config.v1-backup-" + digest(data) + ".json")
+        if backup.exists():
+            if backup.read_bytes() != data:
+                raise Invalid("migration backup does not match original config")
+        else:
+            atomic_bytes(backup, data)
+    atomic_json(path, doc)
+
+
 def update(data_dir, mutation):
     with locked(data_dir):
-        doc = load_config(data_dir)
-        migrate_catalog_locked(data_dir, doc)
+        original = load_config(data_dir)
+        doc = current_config(original)
         mutation(doc)
+        doc["settings"] = canonical_settings(doc["settings"])
         validate_config(doc)
-        atomic_json(Path(data_dir) / "config.json", doc)
+        migrate_catalog_locked(data_dir, original)
+        save_config(data_dir, original, doc)
 
 
 def resolve(data_dir, project=None, explicit=None):
-    doc = load_config(data_dir)
-    settings = DEFAULTS | doc["settings"]
-    sources = {key: "global" if key in doc["settings"] else "bundled" for key in DEFAULTS}
+    doc = current_config(load_config(data_dir))
+    settings = copy.deepcopy(DEFAULTS)
+    sources = {key: "bundled" for key in DEFAULTS}
     ignored = bool(project and not doc["allow_project_overrides"])
+    layers = [(doc["settings"], "global")]
     if project and doc["allow_project_overrides"]:
-        overrides = read_json(project)
-        validate(overrides, schema("settings"))
-        settings.update(overrides)
-        sources.update({key: "project" for key in overrides})
-    overrides = explicit or {}
-    validate(overrides, schema("settings"))
-    settings.update(overrides)
-    sources.update({key: "explicit" for key in overrides})
-    settings["image_mode"] = MODE_ALIASES.get(settings["image_mode"], settings["image_mode"])
-    key = settings["character"]
-    character = doc["characters"].get(key, GUIDE if key == "guide" else None)
+        layers.append((read_json(project), "project"))
+    layers.append((explicit if explicit is not None else {}, "explicit"))
+    for values, source in layers:
+        values = canonical_settings(values)
+        settings.update(values)
+        sources.update({key: source for key in values})
+    key = settings["character_id"]
+    character = doc["characters"].get(key, GUIDE_V2 if key == "guide" else None)
     if character is None:
         raise Invalid(f"unregistered character: {key}")
-    return {"settings": settings, "sources": sources, "project_ignored": ignored, "character": copy.deepcopy(character)}
+    selected = settings["persona_id"]
+    if selected == "default":
+        selected = character["persona_id"]
+        sources["persona_id"] = "character_default"
+    persona = doc["personas"].get(selected, GUIDE_PERSONA if selected == "guide" else None)
+    if persona is None:
+        raise Invalid(f"unregistered persona: {selected}")
+    settings["persona_id"] = selected
+    # Compatibility projections for existing helper consumers.
+    settings.update(character=key, review_mode=settings["scope"])
+    sources.update(character=sources["character_id"], review_mode=sources["scope"])
+    return {"settings": settings, "sources": sources, "project_ignored": ignored,
+            "character": copy.deepcopy(character) | {"persona": persona["style"]},
+            "persona": copy.deepcopy(persona)}
+
+
+def setting_value(key, value):
+    if key == "focus":
+        return [] if not value else value.split(",")
+    return MODE_ALIASES.get(value, value) if key == "image_mode" else value
+
+
+def put_setting(settings, key, value):
+    # Setting either spelling replaces its equivalent, preserving unrelated keys.
+    aliases = {"character": "character_id", "character_id": "character",
+               "review_mode": "scope", "scope": "review_mode"}
+    if key in aliases:
+        settings.pop(aliases[key], None)
+    settings[key] = setting_value(key, value)
+    canonical_settings(settings)
+
+
+def legacy_persona_binding(doc, key, definition):
+    """Legacy character edits never modify a registered/shared persona in place."""
+    current = doc["characters"].get(key, {}).get("persona_id")
+    existing = doc["personas"].get(current, GUIDE_PERSONA if current == "guide" else None)
+    if existing == definition:
+        return current
+    stem = legacy_persona_id(key)
+    candidate = stem
+    suffix = 1
+    while candidate in doc["personas"]:
+        candidate = f"{stem}-{suffix}"
+        suffix += 1
+    doc["personas"][candidate] = definition
+    return candidate
+
+
+def register_character(data_dir, key, definition):
+    character_id(key)
+    if type(definition) is not dict:
+        raise Invalid("character definition must be an object")
+    legacy = "persona" in definition
+    validate(definition, schema("character" if legacy else "character-v2"))
+    if definition["images"]:
+        raise Invalid("register requires empty images; use import-image")
+    def change(doc):
+        value = copy.deepcopy(definition)
+        if legacy:
+            persona = {"name": value["name"], "style": value.pop("persona")}
+            value["persona_id"] = legacy_persona_binding(doc, key, persona)
+        value["images"] = doc["characters"].get(key, {}).get("images", {})
+        doc["characters"][key] = value
+    update(data_dir, change)
+
+
+def register_persona(data_dir, key, definition):
+    persona_id(key)
+    validate(definition, schema("persona"))
+    update(data_dir, lambda doc: doc["personas"].update({key: copy.deepcopy(definition)}))
 
 
 def asset_path(data_dir, filename):
@@ -343,17 +484,17 @@ def import_image(data_dir, key, slot, source):
         raise Invalid("invalid image slot")
     data = image_bytes(source)
     with locked(data_dir):
-        doc = load_config(data_dir)
-        migrate_catalog_locked(data_dir, doc)
+        original = load_config(data_dir)
+        migrate_catalog_locked(data_dir, original)
+        doc = current_config(original)
         if key not in doc["characters"]:
             if key != "guide":
                 raise Invalid("register the character first")
-            doc["characters"][key] = copy.deepcopy(GUIDE)
+            doc["characters"][key] = copy.deepcopy(GUIDE_V2)
         filename = write_asset(data_dir, data)
         if slot == "reference":
             doc["characters"][key]["images"][slot] = filename
-            validate_config(doc)
-            atomic_json(Path(data_dir) / "config.json", doc)
+            save_config(data_dir, original, doc)
         else:
             # The catalog is authoritative for expressions; commit only one binding.
             context = image_context(data_dir, key, doc["characters"][key])
@@ -421,9 +562,13 @@ def expression(review):
 def expression_plan(data_dir, resolved, mood, force=False):
     character = resolved["character"]
     context = image_context(data_dir, resolved["settings"]["character"], character)
-    cached = cached_image(data_dir, context, mood) if not force else None
+    cached_only = resolved["settings"]["image_mode"] == "cached_only"
+    cached = cached_image(data_dir, context, mood) if not force or cached_only else None
     if cached:
         return cached
+    if cached_only:
+        return {"action": "unavailable", "expression": mood,
+                "reason": "cached_only: no usable saved image; image generation is disabled"}
     if context["reference_sha256"] in ("none", "missing"):
         return {"action": "unavailable", "expression": mood, "reason": "reference image is not registered"}
     return {"action": "generate", "request_id": uuid.uuid4().hex, **context, "expression": mood,
@@ -460,15 +605,18 @@ def main(argv=None):
     sub.add_parser("show")
     sub.add_parser("migrate")
     setting = sub.add_parser("set")
-    setting.add_argument("key", choices=[*DEFAULTS, "allow_project_overrides"])
+    setting.add_argument("key", choices=[*SETTING_KEYS, "allow_project_overrides"])
     setting.add_argument("value")
     project_setting = sub.add_parser("set-project")
     project_setting.add_argument("path", type=Path)
-    project_setting.add_argument("key", choices=list(DEFAULTS))
+    project_setting.add_argument("key", choices=list(SETTING_KEYS))
     project_setting.add_argument("value")
     register = sub.add_parser("register")
     register.add_argument("id")
     register.add_argument("definition", type=Path)
+    persona = sub.add_parser("register-persona")
+    persona.add_argument("id")
+    persona.add_argument("definition", type=Path)
     imp = sub.add_parser("import-image")
     imp.add_argument("id")
     imp.add_argument("slot", choices=["reference", *EXPRESSIONS])
@@ -481,7 +629,7 @@ def main(argv=None):
     for name in ("resolve", "plan", "plan-set"):
         command = sub.add_parser(name)
         command.add_argument("--project", type=Path)
-        for key in DEFAULTS:
+        for key in SETTING_KEYS:
             command.add_argument("--" + key.replace("_", "-"))
         if name == "plan":
             command.add_argument("review", type=Path)
@@ -492,7 +640,7 @@ def main(argv=None):
         if args.command == "show":
             result = load_config(args.data_dir)
         elif args.command == "migrate":
-            migrate_catalog(args.data_dir)
+            update(args.data_dir, lambda doc: None)
             result = {"migrated": True}
         elif args.command == "set":
             def change(doc):
@@ -501,7 +649,7 @@ def main(argv=None):
                         raise Invalid("use true or false")
                     doc[args.key] = args.value == "true"
                 else:
-                    doc["settings"][args.key] = MODE_ALIASES.get(args.value, args.value) if args.key == "image_mode" else args.value
+                    put_setting(doc["settings"], args.key, args.value)
             update(args.data_dir, change)
             result = {"saved": True}
         elif args.command == "set-project":
@@ -510,22 +658,16 @@ def main(argv=None):
             with locked(args.path.parent, ".persona-review.lock"):
                 overrides = read_json(args.path) if args.path.exists() else {}
                 validate(overrides, schema("settings"))
-                overrides[args.key] = MODE_ALIASES.get(args.value, args.value) if args.key == "image_mode" else args.value
+                put_setting(overrides, args.key, args.value)
                 resolve(args.data_dir, explicit=overrides)
                 atomic_json(args.path, overrides)
             result = {"saved": True, "project_overrides_enabled": load_config(args.data_dir)["allow_project_overrides"]}
         elif args.command == "register":
-            key = character_id(args.id)
-            definition = read_json(args.definition)
-            validate(definition, schema("character"))
-            # Imports are the only way to attach files; preserve existing managed images.
-            if definition["images"]:
-                raise Invalid("register requires empty images; use import-image")
-            def change(doc):
-                definition["images"] = doc["characters"].get(key, {}).get("images", {})
-                doc["characters"][key] = definition
-            update(args.data_dir, change)
-            result = {"registered": key}
+            register_character(args.data_dir, args.id, read_json(args.definition))
+            result = {"registered": args.id}
+        elif args.command == "register-persona":
+            register_persona(args.data_dir, args.id, read_json(args.definition))
+            result = {"registered_persona": args.id}
         elif args.command == "import-image":
             result = {"asset": import_image(args.data_dir, args.id, args.slot, args.source)}
         elif args.command == "save-generated":
@@ -537,7 +679,7 @@ def main(argv=None):
             validate_review(read_json(args.review))
             result = {"valid": True}
         else:
-            explicit = {key: getattr(args, key) for key in DEFAULTS if getattr(args, key) is not None}
+            explicit = {key: setting_value(key, getattr(args, key)) for key in SETTING_KEYS if getattr(args, key) is not None}
             resolved = resolve(args.data_dir, args.project, explicit)
             if args.command == "resolve":
                 result = resolved

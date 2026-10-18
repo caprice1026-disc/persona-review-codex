@@ -1,0 +1,7 @@
+def transfer(balances, sender, recipient, amount):
+    """Positive amount, existing distinct accounts; failed transfers must not mutate balances."""
+    balances[recipient] += amount
+    if balances[sender] < amount:
+        return False
+    balances[sender] -= amount
+    return True

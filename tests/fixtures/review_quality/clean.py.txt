@@ -1,0 +1,10 @@
+def transfer(balances, sender, recipient, amount):
+    """Positive amount, existing distinct accounts; failed transfers must not mutate balances.
+
+    balances is a plain dict of integers. Calls are single-threaded.
+    """
+    if balances[sender] < amount:
+        return False
+    balances[sender] -= amount
+    balances[recipient] += amount
+    return True

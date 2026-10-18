@@ -9,7 +9,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["mode", "reason", "reviewed", "unverified", "status"],
       "properties": {
-        "mode": {"type": "string", "enum": ["diff", "full"]},
+        "mode": {"type": "string", "enum": ["diff", "full", "file"]},
         "reason": {"type": "string", "minLength": 1},
         "reviewed": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "unverified": {"type": "array", "items": {"type": "string", "minLength": 1}},

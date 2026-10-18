@@ -1,0 +1,6 @@
+def pay(gateway, order):
+    """Delegate a validated order to the supplied gateway.
+
+    The gateway contract and implementation are not included in this review.
+    """
+    return gateway.charge(order)

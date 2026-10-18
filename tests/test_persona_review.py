@@ -47,8 +47,10 @@ class ConfigurationTests(unittest.TestCase):
         doc["allow_project_overrides"] = True
         self.save(doc)
         resolved = pr.resolve(self.data, project, {"image_mode": "hybrid"})
-        self.assertEqual(resolved["settings"], {"character": "guide", "image_mode": "hybrid", "review_mode": "diff"})
-        self.assertEqual(resolved["sources"], {"character": "bundled", "image_mode": "explicit", "review_mode": "project"})
+        self.assertEqual(resolved["settings"], {"character": "guide", "character_id": "guide", "persona_id": "guide",
+                         "image_mode": "hybrid", "review_mode": "diff", "scope": "diff", "focus": []})
+        self.assertEqual(resolved["sources"], {"character": "bundled", "character_id": "bundled", "persona_id": "character_default",
+                         "image_mode": "explicit", "review_mode": "project", "scope": "project", "focus": "bundled"})
 
     def test_disabled_project_is_not_read(self):
         self.assertTrue(pr.resolve(self.data, self.root / "does-not-exist")["project_ignored"])
@@ -255,7 +257,7 @@ class ConfigurationTests(unittest.TestCase):
         source = self.image()
         pr.import_image(self.data, "guide", "reference", source)
         saved = pr.save_generated(self.data, self.plan(), source)
-        pr.update(self.data, lambda d: d["characters"]["guide"].update(persona="new voice"))
+        pr.register_persona(self.data, "guide", {"name": "guide", "style": "new voice"})
         self.assertEqual(self.plan()["record_id"], saved["id"])
         pr.update(self.data, lambda d: d["characters"]["guide"].update(appearance="different person"))
         self.assertEqual(self.plan()["action"], "generate")
