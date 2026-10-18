@@ -21,11 +21,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python: ['3.10', '3.13']
     env:
       PYTHONUTF8: '1'
       PYTHONDONTWRITEBYTECODE: '1'
+      PERSONA_REVIEW_REQUIRE_SHELL_TESTS: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,3 +40,7 @@ jobs:
         run: python scripts/persona_review.py validate-review examples/review.json
       - name: Check hand-authored quality contracts (not a model evaluation)
         run: python tests/review_quality.py check tests/fixtures/review_quality/reference-results.json
+      - name: Build allowlisted distribution artifacts
+        run: python tools/build_dist.py --output dist
+      - name: Verify deterministic rebuild
+        run: python tools/build_dist.py --output dist --check

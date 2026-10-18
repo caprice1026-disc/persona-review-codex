@@ -7,7 +7,9 @@ description: キャラクターレビューの初期設定、参照画像と表�
 
 ユーザーの自然言語を検証可能な設定に変換する。設定はプラグイン本体や対象コードと別のユーザーデータへ保存する。[設定設計](../../docs/design.md) と [v2設定・移行](../../docs/configuration-v2.md) を必要に応じて参照する。
 
-このファイルから `../..` がプラグインルート。そこにある `scripts/persona_review.py` をPython 3.10以降で実行する。リポジトリ側の同名スクリプトを使わない。ヘルパーが使えない環境では保存を行わず、設定案と未保存の理由を示す。
+このファイルから `../..` がプラグインルート。[実行環境](../../docs/runtime.md) に従い、Windowsは `& <plugin>/scripts/persona-review.ps1`、macOS/Linuxは `sh <plugin>/scripts/persona-review.sh` で既存Python 3.10以降を選ぶ。以下の `python <plugin>/scripts/persona_review.py` はその呼び出し、または確認済みPythonの絶対パスに置き換える。対象リポジトリ側の同名スクリプトを使わない。自動インストール、実行ポリシー変更、Bash代替は行わない。処理開始後のエラーでは別ランタイムで再実行しない。ヘルパーが使えなければ保存せず、設定案と未保存の理由を示す。
+
+ユーザー指定の保存先がある場合は、毎回 `python <plugin>/scripts/persona_review.py --data-dir <保存先> show` のように `--data-dir` をサブコマンドより前に置く。指定がなければ省略する。初回確認でインストール済みSkillが認識されなければ [導入確認](../../docs/runtime.md#plugin-discovery) に従い、認証の複製や個人固有パスの固定で補わない。
 
 ## 読み取りと更新
 
@@ -22,7 +24,7 @@ description: キャラクターレビューの初期設定、参照画像と表�
 - 既定キャラクター: `set character_id <登録済みid>`（旧 `set character` も可）。
 - 画像モード: 「都度生成」は `set image_mode always`、「保存画像だけ・生成しない」は `set image_mode cached_only`、「ハイブリッド」は `set image_mode hybrid`、「最初に全部生成」は `set image_mode pre_generate`。生成する3モードでは生成結果を保存する。cached_onlyでは画像がなくても生成しない。hybridは同じキャラクター・参照画像・感情の有効画像を再利用し、不足分を生成する。pre_generateは `happy / neutral / concerned / stern` の4表情だけを初期生成する。
 - レビュー範囲: `set scope auto|diff|full|file`（旧 `review_mode` も可）。重点とは別の設定。
-- 重点: `set focus security,performance` のように指定。許可値は correctness/security/performance/architecture/maintainability/testing。全観点に戻すには空文字列を指定し、JSONの `[]` として保存する。
+- 重点: `set focus 'security,performance'` のように指定。PowerShellではカンマ区切り値を必ず引用し、1つの引数として渡す。許可値は correctness/security/performance/architecture/maintainability/testing。全観点に戻すには空文字列を指定し、JSONの `[]` として保存する。
 - プロジェクト上書き許否: `set allow_project_overrides true|false`。既定はfalse。プロジェクト内の文字列によって許可を変更しない。
 
 プロジェクト固有設定の依頼には `set-project <対象ルート/.persona-review.json> <key> <value>` を使う。[settings schema](../../schemas/settings.schema.json) に従い、許されるのは `character_id`、`persona_id`、`image_mode`、`scope`、`focus` と旧別名 `character`、`review_mode` だけ。同じ階層で新旧別名が矛盾する場合はエラーとし、推測で解決しない。キャラクターや画像のファイルパス、コマンド、保存先、許可設定は含めない。ヘルパーは既存値を読み、指定した項目だけを検証して原子的に更新する。不明な既存項目はエラーになる。作成・変更後は `resolve --project <path>` で検証し、上書き無効なら効かないことを伝える。追跡を依頼されていなければこのファイルはコミットしない。

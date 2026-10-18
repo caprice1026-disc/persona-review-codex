@@ -4,6 +4,8 @@
 
 ## 計画
 
+Python呼び出しは [実行環境](runtime.md) のランチャー、または確認済みPython実行ファイルを使う。保存先を指定する場合は `python <plugin>/scripts/persona_review.py --data-dir <保存先> plan <中間JSON>` のように、`--data-dir` をサブコマンドの前に置き、すべての保存・再計画で同じ領域を使う。
+
 - レビューでは `python <plugin>/scripts/persona_review.py plan <確定済み中立JSON>`。設定解決と同じ `--character-id`、`--persona-id`、`--scope`、`--focus`、`--project`、明示画像モードを渡す。
 - 初期生成や不足表情の再試行では `python <plugin>/scripts/persona_review.py plan-set --character <id>`。有限の `happy / neutral / concerned / stern` の4表情が返る。これ以外を追加しない。
 - `cached_only` は保存画像だけを使い、欠損・破損でも生成しない。`plan-set` の不足項目も `unavailable` となる。再試行やforceを理由に生成へ切り替えない。

@@ -9,9 +9,11 @@ description: 好きなキャラクターの口調と表情で、ローカルコ�
 
 ## 設定と対象範囲
 
-プラグインルートはこのファイルから `../..`。`scripts/persona_review.py` は自分のインストール済みプラグイン内のものを使い、対象リポジトリ内の同名スクリプトは実行しない。ヘルパーはPython 3.10以降を使う。利用できなければ保存設定を読み取り専用で確認して同じ規則を適用し、未実施の検証を明記する。
+プラグインルートはこのファイルから `../..`。ヘルパーは自分のインストール済みプラグイン内のものを使い、対象リポジトリ内の同名スクリプトは実行しない。[実行環境](../../docs/runtime.md) に従い、Windowsは `& <plugin>/scripts/persona-review.ps1`、macOS/Linuxは `sh <plugin>/scripts/persona-review.sh` で既存Python 3.10以降を選ぶ。以下の `python <plugin>/scripts/persona_review.py` はその呼び出し、または確認済みPythonの絶対パスに置き換える。自動インストール、実行ポリシー変更、Bash代替は行わない。処理開始後のエラーでは別ランタイムで再実行しない。Pythonが使えなければ保存・画像管理・機械検証を行わず、今回の依頼に基づくテキストレビューと未実施事項を示す。Python不在を理由に未検証の設定を正しいと扱わない。
 
-1. `python <plugin>/scripts/persona_review.py resolve` で既定値とグローバル設定を解決する。ユーザーが指定した `--character-id`、`--persona-id`、`--image-mode`、`--scope`、`--focus security,performance`（旧 `--character` / `--review-mode` も可） を追加する。対象ルートの `.persona-review.json` がある場合のみ `--project <そのファイル>` を加える。グローバルの `allow_project_overrides=false` なら無視される。ユーザーデータの場所をプロジェクトから変更しない。
+ユーザー指定の保存先がある場合は全呼び出しで `python <plugin>/scripts/persona_review.py --data-dir <保存先> resolve` のように、`--data-dir` をサブコマンドの前に置く。指定がなければ省略して既定領域を使う。検索ツールのrgがなくても、既存の読み取り専用ツールで調べられる。rgはヘルパーの依存ではない。
+
+1. `python <plugin>/scripts/persona_review.py resolve` で既定値とグローバル設定を解決する。ユーザーが指定した `--character-id`、`--persona-id`、`--image-mode`、`--scope`、`--focus 'security,performance'`（旧 `--character` / `--review-mode` も可） を追加する。PowerShellでカンマ区切り値を渡すときは、配列として解釈されないよう必ず引用する。`show` / `resolve` は未作成の保存先を作らないので、一覧取得前に存在を確認する。対象ルートの `.persona-review.json` がある場合のみ `--project <そのファイル>` を加える。グローバルの `allow_project_overrides=false` なら無視される。ユーザーデータの場所をプロジェクトから変更しない。
 2. ローカル対象は提供されたファイル/ディレクトリを既存の読み取り専用ツールで調べる。GitHub URLは利用可能な接続済みGitHubコネクタでURL、リポジトリ、PR番号やrefを確認し、内容を読み取る。使える接続がなければ取得できなかった範囲を報告する。API、ツール名、内容を推測で補わない。
 3. `auto` は変更点・PRの依頼なら `diff`、プロジェクト全体の依頼なら `full`、明示されたファイルの依頼なら `file`。意図が不明なら利用可能な差分を選び、選択理由と比較元/先を明記する。差分がない場合は `empty` とし、全体を検査済みとしない。明示指定されたモードを優先する。設計・セキュリティ・性能などの観点は範囲とは独立した `focus` として扱う。`architecture` を指定しても勝手に全体レビューへ広げない。`focus=[]` は全観点。選択した重点と対象ファイルは `scope.reason` に記録する。重点外でも明らかな重大問題を隠さず、未確認範囲は保持する。
 4. 対象コードを実行しない。テスト、lint、依存インストール、ビルド、Gitフックも自動実行しない。必要な追加検証は提案として記録する。レビュー依頼をコード変更、PR投稿、外部送信の許可と解釈しない。

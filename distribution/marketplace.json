@@ -1,0 +1,10 @@
+{
+  "name": "persona-review-local",
+  "interface": {"displayName": "Persona Review (local)"},
+  "plugins": [{
+    "name": "persona-review",
+    "source": {"source": "local", "path": "./plugins/persona-review"},
+    "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+    "category": "Developer Tools"
+  }]
+}
